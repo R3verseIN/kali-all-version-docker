@@ -1,0 +1,67 @@
+name: Build and Publish Kali Images
+
+on:
+  schedule:
+    - cron: "0 0 * * 1"   # every Monday 00:00 UTC
+  workflow_dispatch:       # manual trigger
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        variant: [top10, headless, default, large, everything]
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Free disk space
+        uses: jlumbroso/free-disk-space@main
+        with:
+          tool-cache: false
+          android: true
+          dotnet: true
+          haskell: true
+          large-packages: true
+          docker-images: true
+          swap-storage: true
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to ghcr.io
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Compute tags
+        id: tags
+        run: |
+          OWNER=$(echo "${{ github.repository_owner }}" | tr '[:upper:]' '[:lower:]')
+          WEEK=$(date -u +'%Y-W%V')
+          echo "tags<<EOF" >> "$GITHUB_OUTPUT"
+          echo "ghcr.io/${OWNER}/kali-${{ matrix.variant }}:latest" >> "$GITHUB_OUTPUT"
+          echo "ghcr.io/${OWNER}/kali-${{ matrix.variant }}:rolling" >> "$GITHUB_OUTPUT"
+          echo "ghcr.io/${OWNER}/kali-${{ matrix.variant }}:${WEEK}" >> "$GITHUB_OUTPUT"
+          echo "EOF" >> "$GITHUB_OUTPUT"
+
+      - name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: dockerfiles/${{ matrix.variant }}.Dockerfile
+          platforms: linux/amd64,linux/arm64
+          push: true
+          no-cache: true
+          tags: ${{ steps.tags.outputs.tags }}
